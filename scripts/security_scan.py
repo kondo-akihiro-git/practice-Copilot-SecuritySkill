@@ -322,6 +322,7 @@ def pyproject_declares_dependencies(path: Path) -> bool:
         return True
     return (
         "[tool.poetry.dependencies]" in content
+        or "[project.optional-dependencies]" in content
         or bool(re.search(r"(?m)^\s*dependencies\s*=\s*\[\s*['\"]", content))
     )
 
