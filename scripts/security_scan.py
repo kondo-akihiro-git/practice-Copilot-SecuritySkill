@@ -11,6 +11,9 @@ import re
 import shutil
 import subprocess  # nosec B404 - this scanner deliberately invokes fixed security tools without a shell.
 import sys
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Iterable
 
@@ -29,6 +32,7 @@ EXCLUDED_PARTS = {
     "htmlcov",
     "tests",
 }
+TEXT_SCAN_MAX_BYTES = 1_048_576
 DEPENDENCY_FILES = {
     "requirements.txt",
     "package.json",
@@ -81,6 +85,9 @@ class Check:
     detail: str
 
 
+_ADVISORY_URL_CACHE: dict[str, bool] = {}
+
+
 def tool_command(command: str) -> list[str] | None:
     """Prefer a tool installed beside the interpreter running this script."""
     local_tool = Path(sys.executable).parent / command
@@ -104,8 +111,29 @@ def is_scannable(path: Path) -> bool:
     return path.suffix.lower() in SOURCE_SUFFIXES and not any(part in EXCLUDED_PARTS for part in path.parts)
 
 
+def project_files(root: Path) -> list[Path]:
+    return sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and not any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts)
+    )
+
+
 def all_source_files(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if path.is_file() and is_scannable(path.relative_to(root)))
+    return [path for path in project_files(root) if is_scannable(path.relative_to(root))]
+
+
+def secret_scan_files(paths: Iterable[Path]) -> list[Path]:
+    candidates: list[Path] = []
+    for path in paths:
+        try:
+            with path.open("rb") as file:
+                content = file.read(TEXT_SCAN_MAX_BYTES + 1)
+        except OSError:
+            candidates.append(path)
+            continue
+        if len(content) <= TEXT_SCAN_MAX_BYTES and b"\0" not in content:
+            candidates.append(path)
+    return candidates
 
 
 def staged_files(root: Path) -> list[Path]:
@@ -126,8 +154,8 @@ def translated_severity(value: object, default: str = "警告") -> str:
     return SEVERITY_MAP.get(str(value).lower(), default)
 
 
-def advisory_links(identifiers: Iterable[object]) -> tuple[tuple[str, str], ...]:
-    """Create links only for advisory URL schemes verified by this project."""
+def advisory_link_candidates(identifiers: Iterable[object]) -> tuple[tuple[str, str], ...]:
+    """Create links only for advisory URL schemes approved by this project."""
     links: list[tuple[str, str]] = []
     seen: set[str] = set()
     for value in identifiers:
@@ -144,6 +172,38 @@ def advisory_links(identifiers: Iterable[object]) -> tuple[tuple[str, str], ...]
             continue
         seen.add(identifier)
     return tuple(links)
+
+
+def is_reachable_advisory_url(url: str) -> bool:
+    if url in _ADVISORY_URL_CACHE:
+        return _ADVISORY_URL_CACHE[url]
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc not in {"osv.dev", "github.com"}:
+        _ADVISORY_URL_CACHE[url] = False
+        return False
+    request = urllib.request.Request(url, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - HTTPS host is allowlisted above.
+            reachable = 200 <= response.status < 400
+    except urllib.error.HTTPError as error:
+        reachable = error.code in {405, 501}
+    except (OSError, ValueError):
+        reachable = False
+    if reachable and url not in _ADVISORY_URL_CACHE:
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:  # nosec B310 - HTTPS host is allowlisted above.
+                reachable = 200 <= response.status < 400
+        except (OSError, urllib.error.HTTPError, ValueError):
+            reachable = False
+    _ADVISORY_URL_CACHE[url] = reachable
+    return reachable
+
+
+def verified_advisory_links(identifiers: Iterable[object]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (label, url) for label, url in advisory_link_candidates(identifiers)
+        if is_reachable_advisory_url(url)
+    )
 
 
 def rel(root: Path, path: Path | str) -> str:
@@ -199,19 +259,20 @@ def scan_bandit(root: Path, files: list[Path]) -> tuple[list[Finding], Check]:
     data = parse_json(result.stdout)
     if not isinstance(data, dict):
         return [], Check("Bandit", "失敗", "Bandit の JSON 結果を解釈できません。")
-    findings = [
-        Finding(
+    findings = []
+    for item in data.get("results", []):
+        raw_path = Path(str(item.get("filename", "")))
+        source_path = raw_path if raw_path.is_absolute() else root / raw_path
+        findings.append(Finding(
             severity=translated_severity(item.get("issue_severity"), "中"),
             title=str(item.get("issue_text", "Bandit が問題を検出しました。")),
             tool="Bandit",
-            path=str(item.get("filename", "")),
+            path=rel(root, source_path),
             line=item.get("line_number"),
             evidence=str(item.get("code", "")).strip(),
             recommendation="Bandit のテスト ID と該当処理の入力経路を確認し、安全な API または検証を適用してください。",
             identifier=str(item.get("test_id", "")),
-        )
-        for item in data.get("results", [])
-    ]
+        ))
     return findings, Check("Bandit", "完了", f"{len(python_files)} Python ファイル、{len(findings)} 件。")
 
 
@@ -237,15 +298,16 @@ def scan_semgrep(root: Path, files: list[Path]) -> tuple[list[Finding], Check]:
     findings = []
     for item in data.get("results", []):
         start = item.get("start", {})
-        path = str(item.get("path", ""))
+        raw_path = Path(str(item.get("path", "")))
+        source_path = raw_path if raw_path.is_absolute() else root / raw_path
         findings.append(
             Finding(
                 severity=translated_severity(item.get("extra", {}).get("severity"), "中"),
                 title=str(item.get("extra", {}).get("message", "Semgrep が問題を検出しました。")),
                 tool="Semgrep",
-                path=path,
+                path=rel(root, source_path),
                 line=start.get("line"),
-                evidence=line_text(root / path, start.get("line")),
+                evidence=line_text(source_path, start.get("line")),
                 recommendation="値の出所、到達可能性、エンコード・検証・権限確認を確認してください。",
                 identifier=str(item.get("check_id", "")),
             )
@@ -253,12 +315,34 @@ def scan_semgrep(root: Path, files: list[Path]) -> tuple[list[Finding], Check]:
     return findings, Check("Semgrep", "完了", f"{len(candidates)} ファイル、{len(findings)} 件。")
 
 
+def pyproject_declares_dependencies(path: Path) -> bool:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return (
+        "[tool.poetry.dependencies]" in content
+        or bool(re.search(r"(?m)^\s*dependencies\s*=\s*\[\s*['\"]", content))
+    )
+
+
 def scan_pip_audit(root: Path, enabled: bool) -> tuple[list[Finding], list[Check]]:
-    requirements = sorted(root.glob("requirements*.txt"))
+    project_paths = project_files(root)
+    requirements = [
+        path for path in project_paths
+        if re.fullmatch(r"requirements(?:[-_].+)?\.txt", path.name)
+    ]
+    unsupported_pipfiles = [path for path in project_paths if path.name in {"Pipfile", "Pipfile.lock"}]
+    pyprojects_without_requirements = [
+        path for path in project_paths
+        if path.name == "pyproject.toml"
+        and pyproject_declares_dependencies(path)
+        and not any(requirement.parent == path.parent for requirement in requirements)
+    ]
     if not enabled:
         return [], [Check("pip-audit", "対象外", "依存関係ファイルは今回の変更に含まれません。")]
-    if not requirements:
-        return [], [Check("pip-audit", "対象外", "requirements*.txt がありません。")]
+    if not requirements and not unsupported_pipfiles and not pyprojects_without_requirements:
+        return [], [Check("pip-audit", "対象外", "Python 依存関係ファイルがありません。")]
     command = tool_command("pip-audit")
     if command is None:
         return [], [Check("pip-audit", "未実施", "pip-audit が見つかりません。`pip install -e '.[scanner]'` を実行してください。")]
@@ -284,23 +368,36 @@ def scan_pip_audit(root: Path, enabled: bool) -> tuple[list[Finding], list[Check
                         evidence=str(vulnerability.get("description", "")).replace("\n", " ")[:300],
                         recommendation="修正済みバージョンへ更新し、到達可能性と互換性を確認してください。",
                         identifier=str(vulnerability.get("id", "")),
-                        links=advisory_links(
+                        links=verified_advisory_links(
                             [vulnerability.get("id", ""), *vulnerability.get("aliases", [])]
                         ),
                         blocking=True,
                     )
                 )
         checks.append(Check("pip-audit", "完了", f"{rel(root, requirement)}: {count} 件。"))
+    for path in pyprojects_without_requirements:
+        checks.append(Check(
+            "pip-audit",
+            "未実施",
+            f"{rel(root, path)} に対応する requirements*.txt がありません。ロック済み requirements を用意してください。",
+        ))
+    for path in unsupported_pipfiles:
+        checks.append(Check(
+            "pip-audit",
+            "未実施",
+            f"{rel(root, path)} はこの版で監査できません。requirements*.txt を用意するか、Pipenv 対応を追加してください。",
+        ))
     return findings, checks
 
 
 def scan_npm_audit(root: Path, enabled: bool) -> tuple[list[Finding], list[Check]]:
-    lockfiles = sorted([*root.rglob("package-lock.json"), *root.rglob("npm-shrinkwrap.json")])
-    lockfiles = [path for path in lockfiles if not any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts)]
+    project_paths = project_files(root)
+    lockfiles = [path for path in project_paths if path.name in {"package-lock.json", "npm-shrinkwrap.json"}]
+    unsupported_lockfiles = [path for path in project_paths if path.name in {"yarn.lock", "pnpm-lock.yaml"}]
     if not enabled:
         return [], [Check("npm audit", "対象外", "JavaScript 依存関係ファイルは今回の変更に含まれません。")]
-    if not lockfiles:
-        return [], [Check("npm audit", "対象外", "package-lock.json または npm-shrinkwrap.json がありません。")]
+    if not lockfiles and not unsupported_lockfiles:
+        return [], [Check("npm audit", "対象外", "JavaScript 依存関係ファイルがありません。")]
     command = tool_command("npm")
     if command is None:
         return [], [Check("npm audit", "未実施", "npm が見つかりません。Node.js/npm を導入してください。")]
@@ -326,6 +423,12 @@ def scan_npm_audit(root: Path, enabled: bool) -> tuple[list[Finding], list[Check
                 )
             )
         checks.append(Check("npm audit", "完了", f"{rel(root, lockfile)}: {len(vulnerabilities)} 件。"))
+    for lockfile in unsupported_lockfiles:
+        checks.append(Check(
+            "npm audit",
+            "未実施",
+            f"{rel(root, lockfile)} はこの版で監査できません。npm lockfile を用意するか、Yarn/pnpm 対応を追加してください。",
+        ))
     return findings, checks
 
 
@@ -340,7 +443,8 @@ def django_check(root: Path, enabled: bool) -> tuple[list[Finding], Check]:
         return [], Check("Django deploy check", "失敗", "Django deploy check を実行できません。")
     if result.returncode == 0:
         return [], Check("Django deploy check", "完了", "警告は検出されませんでした。")
-    if result.returncode == 1:
+    output = f"{result.stdout}\n{result.stderr}"
+    if result.returncode == 1 and "WARNINGS:" in output and "ERRORS:" not in output and "Traceback" not in output:
         return [Finding(
             severity="中",
             title="Django デプロイ設定の警告",
@@ -357,6 +461,19 @@ def severity_counts(findings: Iterable[Finding]) -> dict[str, int]:
     for finding in findings:
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
     return counts
+
+
+def markdown_text(value: str) -> str:
+    value = " ".join(value.splitlines())
+    return re.sub(r"([\\`*_{}\[\]<>#|])", r"\\\1", value)
+
+
+def markdown_code(value: str) -> str:
+    return value.replace("`", "\\`")
+
+
+def markdown_code_block(value: str) -> str:
+    return value.replace("```", "``\\`")
 
 
 def render_report(root: Path, files: list[Path], findings: list[Finding], checks: list[Check], mode: str) -> str:
@@ -391,14 +508,18 @@ def render_report(root: Path, files: list[Path], findings: list[Finding], checks
             f"[{label}]({url})" for label, url in finding.links
         ) or "なし"
         lines.extend([
-            f"### {index}. [{finding.severity}] {finding.title}",
+            f"### {index}. [{finding.severity}] {markdown_text(finding.title)}",
             "",
-            f"- ファイル: `{location}`",
-            f"- 検出方法: {finding.tool}",
-            f"- 識別子: {finding.identifier or 'なし'}",
+            f"- ファイル: `{markdown_code(location)}`",
+            f"- 検出方法: {markdown_text(finding.tool)}",
+            f"- 識別子: {markdown_code(finding.identifier or 'なし')}",
             f"- 参照: {references}",
-            f"- 根拠: {finding.evidence or 'ツールの検出結果'}",
-            f"- 推奨対応: {finding.recommendation or 'コードの文脈を確認して修正してください。'}",
+            "- 根拠:",
+            "",
+            "```text",
+            markdown_code_block(finding.evidence or "ツールの検出結果"),
+            "```",
+            f"- 推奨対応: {markdown_text(finding.recommendation or 'コードの文脈を確認して修正してください。')}",
             "",
         ])
     lines.extend(["## 検査できなかった項目・実行状況", ""])
@@ -430,10 +551,11 @@ def main(argv: list[str] | None = None) -> int:
     if not root.is_dir():
         print(f"エラー: 検査ルートがありません: {root}", file=sys.stderr)
         return 2
-    selected = staged_files(root) if args.staged else all_source_files(root)
+    selected = staged_files(root) if args.staged else project_files(root)
     files = [path for path in selected if is_scannable(path.relative_to(root))]
+    secret_files = secret_scan_files(selected)
     dependency_changed = args.mode == "full" or any(path.name in DEPENDENCY_FILES for path in selected)
-    all_findings, secret_check = scan_secrets(root, files)
+    all_findings, secret_check = scan_secrets(root, secret_files)
     checks = [secret_check]
     findings, check = scan_bandit(root, files)
     all_findings.extend(findings); checks.append(check)

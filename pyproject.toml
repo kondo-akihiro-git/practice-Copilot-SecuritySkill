@@ -9,13 +9,5 @@ description = "Reusable GitHub Copilot skill and local security scanner"
 requires-python = ">=3.10"
 dependencies = []
 
-[project.optional-dependencies]
-scanner = [
-  "bandit[toml]>=1.7.10",
-  "pip-audit>=2.7.3",
-  "semgrep>=1.100.0",
-]
-test = ["pytest>=8.0"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]

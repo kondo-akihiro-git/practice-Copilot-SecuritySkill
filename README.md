@@ -21,8 +21,9 @@ Python/Django を中心に、JavaScript、TypeScript、HTML、CSS と依存関�
 
 `pyproject.toml`、`Pipfile`、`yarn.lock`、`pnpm-lock.yaml` も依存関係変更として認識します。
 この版で自動監査する Python 依存関係形式は `requirements*.txt`、JavaScript 依存関係形式は
-npm の lockfile です。ほかの形式は使用ツールが確定していないため「問題なし」とは扱わず、
-プロジェクトに合わせて監査コマンドを追加してください。
+npm の lockfile です。`pyproject.toml` は同じディレクトリの `requirements*.txt` で監査し、
+Pipenv/Yarn/pnpm の lockfile は **未実施** としてコミットをブロックします。対応する
+requirements または npm lockfile を用意するか、プロジェクトに適した監査コマンドを追加してください。
 
 ## 使用する検査技術と確認内容
 
@@ -37,7 +38,7 @@ npm の lockfile です。ほかの形式は使用ツールが確定していな
 | Bandit | Python の危険な実装 | Python の構文木（AST）を解析し、危険な関数、弱い暗号設定、コマンド実行、SQL 組み立てなどの一般的な危険パターンを検出します。Django のビュー、モデル、設定などの Python コードも対象です。 |
 | Semgrep | Python/Django/JavaScript/TypeScript/HTML の危険なパターン | 同梱ルールで `eval`/`exec`、`shell=True`、生 SQL、JavaScript の `innerHTML`・`document.write`、Django テンプレートの `safe` フィルターなどを検出します。 |
 | Django deploy check | Django のデプロイ設定 | `--django-check` 指定時に `manage.py check --deploy` を実行し、`DEBUG`、HTTPS、Cookie、セキュリティヘッダーなど Django が検出可能な設定警告を確認します。 |
-| 組み込み秘密情報検査 | 誤って含めた認証情報 | 秘密鍵ヘッダー、AWS アクセスキー、GitHub トークンらしき文字列をソース・設定ファイルから検出します。 |
+| 組み込み秘密情報検査 | 誤って含めた認証情報 | テキスト形式のソース・設定ファイルから、秘密鍵ヘッダー、AWS アクセスキー、GitHub トークンらしき文字列を検出します。バイナリ、仮想環境、ビルド成果物は除外します。 |
 | Copilot Chat の文脈レビュー | 設計・認可・処理の組合せ | 自動検査で確定できない IDOR、権限確認漏れ、入力から出力までのデータフローなどを、Skill の手順に従ってコード根拠付きで確認します。 |
 
 ### CVE・OSV・NVD の扱い
@@ -83,14 +84,15 @@ cd SecuritySkill
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e '.[scanner,test]'
+python -m pip install 'bandit[toml]>=1.7.10' 'pip-audit>=2.7.3' 'semgrep>=1.100.0' 'pytest>=8.0'
+python -m pip install -e .
 python scripts/install_pre_commit.py
 ```
 
-Bandit、pip-audit、Semgrep は `scanner` extra で導入されます。外部データベースの照会に
-失敗した場合、スキャナーは成功扱いにしません。パッケージ名、バージョン、脆弱性 ID は
-依存関係監査の根拠として出力されます。NVD は手動の詳細調査で補完し、ローカル実行時に
-API キーを要求しません。
+Bandit、pip-audit、Semgrep、pytest はスキャナーを動かす開発ツールであり、検査対象
+プロジェクトの依存関係ではありません。外部データベースの照会に失敗した場合、スキャナーは
+成功扱いにしません。パッケージ名、バージョン、脆弱性 ID は依存関係監査の根拠として出力されます。
+NVD は手動の詳細調査で補完し、ローカル実行時に API キーを要求しません。
 
 ## 実行方法
 
@@ -123,7 +125,7 @@ git commit -m "Describe change"
 
 レポートは日本語 Markdown で、検査日時、対象数、重大度別件数、ファイル/行、根拠、
 推奨対応、検査の実行状況、コミット可否を出力します。pip-audit が返した CVE、GHSA、
-PYSEC の識別子には、到達確認済みの OSV または GitHub Advisory へのリンクも付けます。
+PYSEC の識別子には、出力前に到達確認した OSV または GitHub Advisory へのリンクも付けます。
 
 | 表記 | 意味 |
 |---|---|
