@@ -70,6 +70,7 @@ class Finding:
     evidence: str = ""
     recommendation: str = ""
     identifier: str = ""
+    links: tuple[tuple[str, str], ...] = ()
     blocking: bool = False
 
 
@@ -123,6 +124,26 @@ def parse_json(text: str) -> object | None:
 
 def translated_severity(value: object, default: str = "警告") -> str:
     return SEVERITY_MAP.get(str(value).lower(), default)
+
+
+def advisory_links(identifiers: Iterable[object]) -> tuple[tuple[str, str], ...]:
+    """Create links only for advisory URL schemes verified by this project."""
+    links: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for value in identifiers:
+        identifier = str(value).strip()
+        if identifier in seen:
+            continue
+        if re.fullmatch(r"CVE-\d{4}-\d{4,}", identifier, flags=re.IGNORECASE):
+            links.append((identifier, f"https://osv.dev/vulnerability/{identifier.upper()}"))
+        elif re.fullmatch(r"GHSA-[\w-]+", identifier, flags=re.IGNORECASE):
+            links.append((identifier, f"https://github.com/advisories/{identifier}"))
+        elif re.fullmatch(r"PYSEC-\d{4}-\d+", identifier, flags=re.IGNORECASE):
+            links.append((identifier, f"https://osv.dev/vulnerability/{identifier.upper()}"))
+        else:
+            continue
+        seen.add(identifier)
+    return tuple(links)
 
 
 def rel(root: Path, path: Path | str) -> str:
@@ -263,6 +284,9 @@ def scan_pip_audit(root: Path, enabled: bool) -> tuple[list[Finding], list[Check
                         evidence=str(vulnerability.get("description", "")).replace("\n", " ")[:300],
                         recommendation="修正済みバージョンへ更新し、到達可能性と互換性を確認してください。",
                         identifier=str(vulnerability.get("id", "")),
+                        links=advisory_links(
+                            [vulnerability.get("id", ""), *vulnerability.get("aliases", [])]
+                        ),
                         blocking=True,
                     )
                 )
@@ -363,12 +387,16 @@ def render_report(root: Path, files: list[Path], findings: list[Finding], checks
         location = finding.path or "該当なし"
         if finding.line is not None:
             location += f":{finding.line}"
+        references = ", ".join(
+            f"[{label}]({url})" for label, url in finding.links
+        ) or "なし"
         lines.extend([
             f"### {index}. [{finding.severity}] {finding.title}",
             "",
             f"- ファイル: `{location}`",
             f"- 検出方法: {finding.tool}",
             f"- 識別子: {finding.identifier or 'なし'}",
+            f"- 参照: {references}",
             f"- 根拠: {finding.evidence or 'ツールの検出結果'}",
             f"- 推奨対応: {finding.recommendation or 'コードの文脈を確認して修正してください。'}",
             "",
