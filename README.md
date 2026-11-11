@@ -24,6 +24,33 @@ Python/Django を中心に、JavaScript、TypeScript、HTML、CSS と依存関�
 npm の lockfile です。ほかの形式は使用ツールが確定していないため「問題なし」とは扱わず、
 プロジェクトに合わせて監査コマンドを追加してください。
 
+## 使用する検査技術と確認内容
+
+各検査は異なる種類の問題を対象とします。たとえば、**CVE の確認**と
+**Bandit によるコード検査**は別の検査です。両方を実行することで、利用中ライブラリの
+既知の問題と、自作コードに含まれる危険な実装を分けて確認します。
+
+| 技術・ツール | 主な確認対象 | 確認方法と出力 |
+|---|---|---|
+| pip-audit | Python ライブラリの既知脆弱性 | `requirements*.txt` のパッケージ名・固定バージョンを脆弱性情報と照合します。CVE、GHSA、PYSEC などの識別子が返った場合は、識別子と OSV/GitHub Advisory へのリンクを出力します。 |
+| npm audit | npm ライブラリの既知脆弱性 | `package-lock.json` または `npm-shrinkwrap.json` の依存関係ツリーを npm レジストリのアドバイザリと照合します。 |
+| Bandit | Python の危険な実装 | Python の構文木（AST）を解析し、危険な関数、弱い暗号設定、コマンド実行、SQL 組み立てなどの一般的な危険パターンを検出します。Django のビュー、モデル、設定などの Python コードも対象です。 |
+| Semgrep | Python/Django/JavaScript/TypeScript/HTML の危険なパターン | 同梱ルールで `eval`/`exec`、`shell=True`、生 SQL、JavaScript の `innerHTML`・`document.write`、Django テンプレートの `safe` フィルターなどを検出します。 |
+| Django deploy check | Django のデプロイ設定 | `--django-check` 指定時に `manage.py check --deploy` を実行し、`DEBUG`、HTTPS、Cookie、セキュリティヘッダーなど Django が検出可能な設定警告を確認します。 |
+| 組み込み秘密情報検査 | 誤って含めた認証情報 | 秘密鍵ヘッダー、AWS アクセスキー、GitHub トークンらしき文字列をソース・設定ファイルから検出します。 |
+| Copilot Chat の文脈レビュー | 設計・認可・処理の組合せ | 自動検査で確定できない IDOR、権限確認漏れ、入力から出力までのデータフローなどを、Skill の手順に従ってコード根拠付きで確認します。 |
+
+### CVE・OSV・NVD の扱い
+
+CVE は脆弱性を識別する番号であり、脆弱性の有無をコードだけから判定する仕組みでは
+ありません。この Skill では pip-audit と npm audit がパッケージ名・バージョンを既知の
+アドバイザリ情報と照合します。CVE が付与されたアドバイザリなら、その CVE を結果に表示
+します。OSV は複数の脆弱性情報源を横断して参照できるデータベースとしてリンク先に使い、
+NVD は CVE の詳細調査・影響評価を補完する情報源として利用します。
+
+依存関係に CVE がない、または脆弱性データベースに接続できないことは、安全の保証では
+ありません。後者は **未実施・失敗** と表示し、コミット前検査ではブロックします。
+
 ## 構成
 
 ```text
