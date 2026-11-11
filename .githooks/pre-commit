@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+python=python3
+if [ -x .venv/bin/python ]; then
+  python=.venv/bin/python
+fi
+exec "$python" scripts/security_scan.py --mode pre-commit --staged

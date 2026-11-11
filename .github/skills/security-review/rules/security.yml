@@ -1,0 +1,50 @@
+rules:
+  - id: python-dynamic-execution
+    languages: [python]
+    severity: ERROR
+    message: "動的コード実行です。信頼できない入力が到達しないことを確認し、可能なら安全な代替手段を使用してください。"
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+  - id: python-shell-true
+    languages: [python]
+    severity: WARNING
+    message: "shell=True はコマンドインジェクションにつながります。固定コマンドと引数リストを使用してください。"
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: django-raw-sql
+    languages: [python]
+    severity: WARNING
+    message: "生SQLです。プレースホルダーによるパラメータ化と入力値の検証を確認してください。"
+    patterns:
+      - pattern-either:
+          - pattern: $OBJ.raw(...)
+          - pattern: $CURSOR.execute(...)
+  - id: javascript-dynamic-execution
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: "動的JavaScript実行です。信頼できない入力を渡さず、安全な API に置き換えてください。"
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: new Function(...)
+          - pattern: setTimeout("...", ...)
+          - pattern: setInterval("...", ...)
+  - id: javascript-unsafe-html-sink
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: "HTML 挿入先です。値が信頼できない場合は DOM-based XSS になります。textContent 等を検討してください。"
+    patterns:
+      - pattern-either:
+          - pattern: $NODE.innerHTML = ...
+          - pattern: $NODE.outerHTML = ...
+          - pattern: document.write(...)
+  - id: django-template-safe-filter
+    languages: [generic]
+    severity: WARNING
+    message: "Django の safe フィルターです。値がサニタイズ済みか確認してください。"
+    paths:
+      include:
+        - "**/templates/**"
+        - "**/*.html"
+    pattern-regex: "\\|\\s*safe\\b"

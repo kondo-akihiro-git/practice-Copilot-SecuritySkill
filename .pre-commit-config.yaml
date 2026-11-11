@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: security-scan
+        name: セキュリティ検査
+        entry: python3 scripts/security_scan.py --mode pre-commit --staged
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
