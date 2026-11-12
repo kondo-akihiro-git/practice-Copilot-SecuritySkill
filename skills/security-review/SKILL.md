@@ -16,9 +16,10 @@ description: Python、Django、JavaScript、TypeScript、HTML、CSS のソース
 
 ## 実行手順
 
-1. リポジトリの指示、対象技術、依存マニフェスト、ロックファイルを確認する。
-2. `python3 scripts/security_scan.py --mode full --django-check` を実行する。
-   コミット前は `python3 scripts/security_scan.py --mode pre-commit --staged` を実行する。
+1. 対象リポジトリの指示、対象技術、依存マニフェスト、ロックファイルを確認する。
+2. プラグインに同梱する `scripts/security_scan.py` を使用し、対象リポジトリを
+   `--root` で明示する。全体検査では `--mode full --django-check`、コミット前は
+   `--mode pre-commit --staged` を指定する。
 3. 結果 Markdown の「検査できなかった項目」を必ず確認する。ツール未導入、ネットワーク
    失敗、タイムアウトは安全の証明ではない。
 4. 静的解析の検出結果をコード文脈とデータフローで再確認する。AI の結論は

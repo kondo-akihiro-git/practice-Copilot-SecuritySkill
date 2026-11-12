@@ -1,12 +1,28 @@
-# Copilot Security Skill
+# Copilot Security Review Plugin
 
 Python/Django を中心に、JavaScript、TypeScript、HTML、CSS と依存関係を検査する、
-再利用可能な GitHub Copilot Agent Skill とローカルスキャナーです。既知の依存関係
+再利用可能な GitHub Copilot Agent Plugin、Skill、ローカルスキャナーです。既知の依存関係
 脆弱性、危険な実装パターン、秘密情報、Django のデプロイ設定を別々に検査し、
 日本語 Markdown で結果を出力します。
 
 > 自動検査で「問題なし」となっても安全性は保証されません。認証・認可、IDOR、
 > 到達可能性、業務上の権限は Copilot Chat と人間のレビューで確認してください。
+
+## Plugin としての導入
+
+このリポジトリは Agent Plugins 1.0 形式です。Copilot CLI 利用者は、無料で次のコマンドにより
+GitHub リポジトリから Plugin を導入できます。
+
+```bash
+copilot plugin install kondo-akihiro-git/practice-Copilot-SecuritySkill
+```
+
+導入後は `copilot plugin list` で `copilot-security-review` が有効であることを確認し、
+Copilot Chat でセキュリティレビューを依頼します。更新は `copilot plugin update
+copilot-security-review`、削除は `copilot plugin uninstall copilot-security-review` です。
+
+Plugin は Skill と同梱する検査ルール・スクリプトを一緒に配布する単位です。対象プロジェクトの
+依存関係や検査ツールは別途導入が必要であり、Plugin の導入だけで Git hook は自動設定されません。
 
 ## 対象と検査内容
 
@@ -56,7 +72,8 @@ NVD は CVE の詳細調査・影響評価を補完する情報源として利�
 
 ```text
 SecuritySkill/
-├── .github/skills/security-review/
+├── plugin.json                  # Agent Plugins 1.0 マニフェスト
+├── skills/security-review/
 │   ├── SKILL.md                 # Copilot が読む Skill 定義
 │   └── rules/security.yml       # ローカル Semgrep ルール
 ├── .githooks/pre-commit         # ネイティブ Git フック
@@ -70,8 +87,8 @@ SecuritySkill/
 ```
 
 別プロジェクトで使うには、このディレクトリをコピーするか Skill と `scripts/` を取り込み、
-対象プロジェクトのリポジトリルートでスクリプトを実行します。Skill は
-`.github/skills/security-review/SKILL.md` に置く構成です。
+対象プロジェクトのリポジトリルートでスクリプトを実行します。Plugin として利用する場合は、
+Copilot CLI が `skills/security-review/SKILL.md` を検出します。
 
 ## 導入
 
@@ -99,13 +116,13 @@ NVD は手動の詳細調査で補完し、ローカル実行時に API キー�
 全体検査（Django プロジェクトは安全に初期化できる環境で実行）:
 
 ```bash
-python scripts/security_scan.py --mode full --django-check --output reports/security-report.md
+python scripts/security_scan.py --root /path/to/target --mode full --django-check --output reports/security-report.md
 ```
 
 Django プロジェクト以外、または Django 設定を実行したくない場合:
 
 ```bash
-python scripts/security_scan.py --mode full
+python scripts/security_scan.py --root /path/to/target --mode full
 ```
 
 コミット前は、フックがステージ済みソースを Bandit/Semgrep/秘密情報検査にかけます。
@@ -155,6 +172,6 @@ CLI から自動起動しません。認証、料金、データ送信先、実�
 
 言語やフレームワークを追加する際は、専用の検査器を `scripts/security_scan.py` に追加し、
 その失敗状態を必ずレポートへ記録してください。新規 Semgrep ルールは
-`.github/skills/security-review/rules/` に追加し、誤検知・検出例をテストします。
+`skills/security-review/rules/` に追加し、誤検知・検出例をテストします。
 採用理由、重大度の扱い、公式資料は
 [`references/tooling-and-severity.md`](references/tooling-and-severity.md) に記録します。

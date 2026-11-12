@@ -1,4 +1,5 @@
 import subprocess
+import json
 from pathlib import Path
 
 from scripts import security_scan
@@ -94,3 +95,13 @@ def test_report_escapes_untrusted_markdown() -> None:
 
     assert "### 1. [高] \\# 偽の見出し" in report
     assert "``\\`" in report
+
+
+def test_agent_plugin_manifest_and_skill_layout_exist() -> None:
+    root = Path(__file__).parents[1]
+    manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+
+    assert manifest["$schema"] == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+    assert manifest["name"] == "copilot-security-review"
+    assert (root / "skills/security-review/SKILL.md").is_file()
+    assert (root / "skills/security-review/rules/security.yml").is_file()

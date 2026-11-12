@@ -283,7 +283,7 @@ def scan_semgrep(root: Path, files: list[Path]) -> tuple[list[Finding], Check]:
     command = tool_command("semgrep")
     if command is None:
         return [], Check("Semgrep", "未実施", "semgrep が見つかりません。`pip install -e '.[scanner]'` を実行してください。")
-    rules = root / ".github/skills/security-review/rules/security.yml"
+    rules = Path(__file__).resolve().parents[1] / "skills/security-review/rules/security.yml"
     if not rules.is_file():
         return [], Check("Semgrep", "失敗", f"ルールがありません: {rel(root, rules)}")
     result = run_command([*command, "scan", "--config", str(rules), "--json", "--quiet", *map(str, candidates)], root)

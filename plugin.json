@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "copilot-security-review",
+  "version": "0.2.0",
+  "description": "Japanese security review skill for Python, Django, JavaScript, and TypeScript projects",
+  "author": {
+    "name": "akihiro"
+  },
+  "repository": "https://github.com/kondo-akihiro-git/practice-Copilot-SecuritySkill",
+  "license": "MIT",
+  "keywords": [
+    "security",
+    "django",
+    "python",
+    "semgrep",
+    "dependency-audit"
+  ]
+}
