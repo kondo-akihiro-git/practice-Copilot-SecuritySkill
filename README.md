@@ -10,16 +10,18 @@ Python/Django を中心に、JavaScript、TypeScript、HTML、CSS と依存関�
 
 ## Plugin としての導入
 
-このリポジトリは Agent Plugins 1.0 形式です。Copilot CLI 利用者は、無料で次のコマンドにより
-GitHub リポジトリから Plugin を導入できます。
+このリポジトリは Agent Plugins 1.0 形式で、無料の Plugin Marketplace も含みます。
+Copilot CLI 利用者は、次のコマンドでMarketplaceを登録してからPluginを導入できます。
 
 ```bash
-copilot plugin install kondo-akihiro-git/practice-Copilot-SecuritySkill
+copilot plugin marketplace add kondo-akihiro-git/practice-Copilot-SecuritySkill
+copilot plugin install copilot-security-review@kondo-security-tools
 ```
 
 導入後は `copilot plugin list` で `copilot-security-review` が有効であることを確認し、
-Copilot Chat でセキュリティレビューを依頼します。更新は `copilot plugin update
-copilot-security-review`、削除は `copilot plugin uninstall copilot-security-review` です。
+Copilot Chat でセキュリティレビューを依頼します。更新は `copilot plugin marketplace update
+kondo-security-tools` の後に `copilot plugin update copilot-security-review`、削除は
+`copilot plugin uninstall copilot-security-review` です。
 
 Plugin は Skill と同梱する検査ルール・スクリプトを一緒に配布する単位です。対象プロジェクトの
 依存関係や検査ツールは別途導入が必要であり、Plugin の導入だけで Git hook は自動設定されません。
@@ -72,6 +74,7 @@ NVD は CVE の詳細調査・影響評価を補完する情報源として利�
 
 ```text
 SecuritySkill/
+├── .github/plugin/marketplace.json # 第三者導入用のMarketplaceカタログ
 ├── plugin.json                  # Agent Plugins 1.0 マニフェスト
 ├── skills/security-review/
 │   ├── SKILL.md                 # Copilot が読む Skill 定義

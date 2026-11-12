@@ -105,3 +105,18 @@ def test_agent_plugin_manifest_and_skill_layout_exist() -> None:
     assert manifest["name"] == "copilot-security-review"
     assert (root / "skills/security-review/SKILL.md").is_file()
     assert (root / "skills/security-review/rules/security.yml").is_file()
+
+
+def test_marketplace_catalog_publishes_this_plugin() -> None:
+    root = Path(__file__).parents[1]
+    marketplace = json.loads(
+        (root / ".github/plugin/marketplace.json").read_text(encoding="utf-8")
+    )
+
+    assert marketplace["name"] == "kondo-security-tools"
+    assert marketplace["plugins"] == [{
+        "name": "copilot-security-review",
+        "description": "Japanese security review skill for Python, Django, JavaScript, and TypeScript projects",
+        "version": "0.2.0",
+        "source": ".",
+    }]

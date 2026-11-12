@@ -1,0 +1,18 @@
+{
+  "name": "kondo-security-tools",
+  "metadata": {
+    "description": "Security-related GitHub Copilot plugins maintained by kondo-akihiro-git",
+    "version": "1.0.0"
+  },
+  "owner": {
+    "name": "akihiro"
+  },
+  "plugins": [
+    {
+      "name": "copilot-security-review",
+      "description": "Japanese security review skill for Python, Django, JavaScript, and TypeScript projects",
+      "version": "0.2.0",
+      "source": "."
+    }
+  ]
+}
